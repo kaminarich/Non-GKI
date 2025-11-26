@@ -1,4 +1,4 @@
-name: Build Jbub5 Kernel Lancelot Fixed (ThinLTO)
+name: DEBUG MODE - Build Jbub5 Kernel (Single Thread)
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Kernel by ${{ github.actor }}
+    name: Build Kernel Debug by ${{ github.actor }}
     runs-on: ubuntu-22.04
     env:
       # --- KERNEL SOURCE ---
@@ -39,7 +39,7 @@ jobs:
       ENABLE_GCC_ARM32: "false"
 
       # --- BUILD COMMANDS ---
-      # Menambahkan LD=ld.lld untuk memastikan linker yang benar digunakan untuk LTO
+      # Menambahkan LD=ld.lld
       EXTRA_CMDS: "LLVM=1 LLVM_IAS=1 LD=ld.lld AS=llvm-as AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabihf- CROSS_COMPILE_COMPAT=arm-linux-gnueabihf- CONFIG_NO_ERROR_ON_MISMATCH=y TARGET_BUILD_VARIANT=user"
 
       # --- KERNELSU & FEATURES ---
@@ -65,10 +65,8 @@ jobs:
       ENABLE_CCACHE: "false"
       REMOVE_UNUSED_PACKAGES: "false"
       
-      # Setting LTO & WError
-      # DISABLE_LTO: "false" artinya LTO tetap NYALA (kita atur jadi Thin di bawah)
-      DISABLE_LTO: "false"
-      # DISABLE_CC_WERROR: "true" artinya matikan error pedantic (biar lolos warning)
+      # KITA MATIKAN LTO & WERROR BIAR GAK RIBET DULU
+      DISABLE_LTO: "true"
       DISABLE_CC_WERROR: "true"
       
       FIX_WIFI_SPEED: "false"
@@ -187,16 +185,9 @@ jobs:
         
         # --- PERBAIKAN NAMA KERNEL ---
         cd android-kernel
-        
-        # 1. Bersihkan EXTRAVERSION di Makefile
         sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION =/' Makefile
-        
-        # 2. Cegah penambahan Git Hash
         touch .scmversion
-        
-        # 3. Set Nama Custom
-        echo "-💠Aetherium1.0-Primordial" > localversion
-        
+        echo "-💠Aetherium1.0-DEBUG" > localversion
         cd ..
         
         if [[ ${{ env.ADD_LOCALVERSION_TO_FILENAME }} == 'true' ]]; then
@@ -228,7 +219,6 @@ jobs:
         echo "UPLOADNAME=-KernelSU$KSU_VERSION" >> $GITHUB_ENV
         
         # --- FIX KSU: DELETE MODULE_IMPORT_NS LINE ---
-        # Ini menghapus baris yang bikin error 'type specifier missing' di ksu.c
         echo "Deleting problematic MODULE_IMPORT_NS line..."
         sed -i '/VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver/d' drivers/kernelsu/ksu.c || true
         # ---------------------------------------------
@@ -262,23 +252,12 @@ jobs:
             echo "CONFIG_OVERLAY_FS_INDEX=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
         fi
 
-        # --- LOGIC THINLTO VS DISABLE LTO ---
-        if [ ${{ env.DISABLE_LTO }} = true ]; then
-            # Jika user mau MATIKAN LTO sepenuhnya
-            sed -i 's/CONFIG_LTO=y/CONFIG_LTO=n/' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-            sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-            sed -i 's/CONFIG_THINLTO=y/CONFIG_THINLTO=n/' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-            echo "CONFIG_LTO_NONE=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-        else
-            # Jika LTO NYALA, kita paksa pakai THINLTO (Hemat RAM)
-            echo "Forcing ThinLTO configuration..."
-            echo "CONFIG_LTO=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-            echo "CONFIG_LTO_CLANG=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-            echo "CONFIG_THINLTO=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-            # Matikan Full LTO biar gak OOM
-            sed -i 's/CONFIG_LTO_CLANG_FULL=y/CONFIG_LTO_CLANG_FULL=n/' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-            echo "CONFIG_LTO_CLANG_FULL=n" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-        fi
+        # --- FORCE DISABLE LTO FOR DEBUGGING ---
+        # Matikan LTO sepenuhnya agar tidak OOM
+        sed -i 's/CONFIG_LTO=y/CONFIG_LTO=n/' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
+        sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
+        sed -i 's/CONFIG_THINLTO=y/CONFIG_THINLTO=n/' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
+        echo "CONFIG_LTO_NONE=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
         # ------------------------------------
 
         if [ ${{ env.DISABLE_CC_WERROR }} = true ]; then
@@ -295,7 +274,7 @@ jobs:
         key: build-kernel-${{ env.DEVICE }}${{ env.LOCALVERSION }}${{ env.UPLOADNAME }}
         max-size: 2G
 
-    - name: Build kernel
+    - name: Build kernel (SINGLE THREAD DEBUG)
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         
@@ -316,12 +295,14 @@ jobs:
           export KSU_EXPECTED_SIZE=${{ env.KSU_EXPECTED_SIZE }}
           export KSU_EXPECTED_HASH=${{ env.KSU_EXPECTED_HASH }}
         fi
-        make -j$(nproc --all) CC=clang O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }} ${{ env.KERNEL_CONFIG }}
+        
+        # --- DEBUG CHANGE: PAKE -j1 (Satu Thread) ---
+        make -j1 CC=clang O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }} ${{ env.KERNEL_CONFIG }}
         
         if [ ${{ env.ENABLE_CCACHE }} = true ]; then
-             make -j$(nproc --all) CC="ccache clang" O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }}
+             make -j1 CC="ccache clang" O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }}
         else
-             make -j$(nproc --all) CC=clang O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }}
+             make -j1 CC=clang O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }}
         fi
 
     - name: Check a kernel output files
