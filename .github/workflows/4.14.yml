@@ -1,4 +1,4 @@
-name: Build Proton Kernel Lancelot
+name: Build Jbub5 Kernel Lancelot
 
 on:
   workflow_dispatch:
@@ -12,19 +12,19 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       # --- KERNEL SOURCE ---
-      KERNEL_SOURCE: "https://github.com/MrShockWAVEE/Proton_kernel_Xioami_mt6768"
-      KERNEL_SOURCE_BRANCH: "ShockWAVE-Tree-WIP"
+      KERNEL_SOURCE: "https://github.com/Jbub5/android_kernel_xiaomi_mt6768"
+      KERNEL_SOURCE_BRANCH: "kernel-tree"
       KERNEL_CONFIG: "lancelot_defconfig"
       KERNEL_IMAGE_NAME: "Image.gz-dtb"
       KERNEL_ARCH: "arm64"
       ADD_LOCALVERSION_TO_FILENAME: "false"
 
-      # --- COMPILER SETTINGS (Custom Clang + GCC Linaro) ---
+      # --- COMPILER SETTINGS (Custom Clang + GCC Linaro 14) ---
       USE_CUSTOM_CLANG: "true"
-      CUSTOM_CLANG_SOURCE: "https://github.com/ZyCromerZ/Clang/releases/download/21.0.0git-20250425-release/Clang-21.0.0git-20250425.tar.gz"
+      CUSTOM_CLANG_SOURCE: "https://github.com/ZyCromerZ/Clang/releases/download/21.0.0git-20250415-release/Clang-21.0.0git-20250415.tar.gz"
       CUSTOM_CLANG_BRANCH: ""
       
-      # Saya set True agar GCC Linaro didownload
+      # Set True untuk mendownload GCC Linaro yang kamu request
       USE_CUSTOM_GCC: "true" 
       USE_CUSTOM_GCC_64: "true"
       CUSTOM_GCC_64_SOURCE: "https://snapshots.linaro.org/gnu-toolchain/14.0-2023.06-1/aarch64-linux-gnu/gcc-linaro-14.0.0-2023.06-x86_64_aarch64-linux-gnu.tar.xz"
@@ -34,28 +34,30 @@ jobs:
       CUSTOM_GCC_32_SOURCE: "https://snapshots.linaro.org/gnu-toolchain/14.0-2023.06-1/arm-linux-gnueabihf/gcc-linaro-14.0.0-2023.06-x86_64_arm-linux-gnueabihf.tar.xz"
       CUSTOM_GCC_32_BIN: "arm-linux-gnueabihf"
 
-      # Fallback AOSP (Disabled as per your config)
+      # Fallback AOSP (Disabled)
       ENABLE_GCC_AOSP: "false"
-      ENABLE_GCC_ARM64: "true"
-      ENABLE_GCC_ARM32: "true"
+      ENABLE_GCC_ARM64: "false"
+      ENABLE_GCC_ARM32: "false"
 
       # --- BUILD COMMANDS (Full LLVM) ---
       EXTRA_CMDS: "LLVM=1 LLVM_IAS=1 LD=ld.lld AS=llvm-as AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CONFIG_NO_ERROR_ON_MISMATCH=y TARGET_BUILD_VARIANT=user"
 
       # --- KERNELSU & FEATURES ---
       ENABLE_KERNELSU: "true"
+      KERNELSU_SETUP_SOURCE: "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh"
+      KERNELSU_TAG: "v1.0.1"
       KSU_HOOKS_PATCH: "false"
-      KSU_REVERT: "false"
+      KSU_REVERT: "true"
       ADD_KPROBES_CONFIG: "false"
-      ADD_OVERLAYFS_CONFIG: "true"
+      ADD_OVERLAYFS_CONFIG: "false"
       ADD_APATCH_SUPPORT: "false"
       FIX_APATCH_OPENELA: "false"
-      OLD_ANDROID_SUPPORT: "true"
+      OLD_ANDROID_SUPPORT: "false"
       
       # --- ANYKERNEL3 ---
       USE_CUSTOM_ANYKERNEL3: "true"
-      CUSTOM_ANYKERNEL3_SOURCE: "https://github.com/Edhic1/AnyKernel3.git"
-      CUSTOM_ANYKERNEL3_BRANCH: "master"
+      CUSTOM_ANYKERNEL3_SOURCE: "https://github.com/Jbub5/AnyKernel3.git"
+      CUSTOM_ANYKERNEL3_BRANCH: "proton"
       
       # --- MISC ---
       BUILD_BOOT_IMG: "false"
@@ -197,115 +199,75 @@ jobs:
             echo "HAVE_SOURCE_BOOT_IMAGE=true" >> $GITHUB_ENV
         fi
 
-    - name: Setup KernelSU
+    - name: Setup KernelSU (Official Tiann)
       if: env.ENABLE_KERNELSU == 'true'
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-dev
+        
+        # Menggunakan script setup dari tiann/KernelSU sesuai request
+        curl -LSs "${{ env.KERNELSU_SETUP_SOURCE }}" | bash -s ${{ env.KERNELSU_TAG }}
+        
         if [ -d KernelSU ]; then
             KSU_VERSION="_$(cd KernelSU && expr $(/usr/bin/git rev-list --count HEAD) + 10200)"
         else
             KSU_VERSION=""
         fi
         echo "UPLOADNAME=-KernelSU$KSU_VERSION" >> $GITHUB_ENV
+        
         if [ ${{ env.KSU_REVERT }} = true ]; then
-            git apply $GITHUB_WORKSPACE/patches/KSU_REVERT.patch
+             echo "Applying KSU Revert..."
+             # Pastikan patch revert ada atau skip jika tidak diperlukan untuk official KSU
+             # Official KSU setup biasanya sudah bersih, tapi jika ada patch revert manual:
+             if [ -f $GITHUB_WORKSPACE/patches/KSU_REVERT.patch ]; then
+                git apply $GITHUB_WORKSPACE/patches/KSU_REVERT.patch
+             else
+                echo "Warning: KSU_REVERT patch not found, skipping."
+             fi
         fi
         
     - name: Setup Configuration for Kernel
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        
+        # KernelSU Configuration
         if [ ${{ env.ENABLE_KERNELSU }} = true ]; then
             if [ ${{ env.KSU_HOOKS_PATCH }} = true ]; then
                 git apply $GITHUB_WORKSPACE/patches/KSU_HOOKS_PATCH.patch
-                if grep -q "CONFIG_KSU" arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}; then
-                    sed -i 's/# CONFIG_KSU is not set/CONFIG_KSU=y/g' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-                    sed -i 's/CONFIG_KSU=n/CONFIG_KSU=y/g' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-                else
-                    echo "CONFIG_KSU=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-                fi
             fi
-            if [ ${{ env.ADD_KPROBES_CONFIG }} = true -a ${{ env.KSU_HOOKS_PATCH }} != true ]; then
+            
+            # Setup Configs
+            echo "CONFIG_KSU=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
+            if [ ${{ env.ADD_KPROBES_CONFIG }} = true ]; then
                 echo "CONFIG_MODULES=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
                 echo "CONFIG_KPROBES=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
                 echo "CONFIG_HAVE_KPROBES=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
                 echo "CONFIG_KPROBE_EVENTS=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
             fi
-        for config in CONFIG_KSU=y \
-                      CONFIG_KSU_DEBUG=y \
-                      CONFIG_KSU_SUSFS=y \
-                      CONFIG_KSU_SUSFS_SUS_PATH=y \
-                      CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y \
-                      CONFIG_KSU_SUSFS_SUS_MOUNT=y \
-                      CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y \
-                      CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y \
-                      CONFIG_KSU_SUSFS_SUS_KSTAT=y \
-                      CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y \
-                      CONFIG_KSU_SUSFS_TRY_UMOUNT=y \
-                      CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y \
-                      CONFIG_KSU_SUSFS_SPOOF_UNAME=y \
-                      CONFIG_KSU_SUSFS_ENABLE_LOG=y \
-                      CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y \
-                      CONFIG_KSU_SUSFS_SPOOF_PROC_CMDLINE=y \
-                      CONFIG_KSU_SUSFS_OPEN_REDIRECT=y \
-                      CONFIG_KSU_SUSFS_SUS_SU=y \
-                      CONFIG_WITH_KPROBES=n \
-                      CONFIG_KPM=y \
-                      CONFIG_KALLSYMS=y \
-                      CONFIG_KALLSYMS_ALL=y
-                     
-        do
-        echo "$config" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-        done
         fi
+        
+        # OverlayFS
         if [ ${{ env.ADD_OVERLAYFS_CONFIG }} = true ]; then
             echo "CONFIG_OVERLAY_FS=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
             echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
             echo "CONFIG_OVERLAY_FS_INDEX=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
         fi
-        if [ ${{ env.ADD_APATCH_SUPPORT }} = true ]; then
-                sed -i 's/# CONFIG_DEBUG_KERNEL is not set/CONFIG_DEBUG_KERNEL=y/g' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-                sed -i 's/CONFIG_DEBUG_KERNEL=n/CONFIG_DEBUG_KERNEL=y/g' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-                echo "CONFIG_DEBUG_KERNEL=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-                sed -i 's/# CONFIG_KALLSYMS is not set/CONFIG_KALLSYMS=y/g' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-                sed -i 's/CONFIG_KALLSYMS=n/CONFIG_KALLSYMS=y/g' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-                echo "CONFIG_KALLSYMS=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-                sed -i 's/# CONFIG_KALLSYMS_ALL is not set/CONFIG_KALLSYMS_ALL=y/g' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-                sed -i 's/CONFIG_KALLSYMS_ALL=n/CONFIG_KALLSYMS_ALL=y/g' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-                echo "CONFIG_KALLSYMS_ALL=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-                sed -i 's/# CONFIG_KALLSYMS_BASE_RELATIVE is not set/CONFIG_KALLSYMS_BASE_RELATIVE=y/g' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-                sed -i 's/CONFIG_KALLSYMS_BASE_RELATIVE=n/CONFIG_KALLSYMS_BASE_RELATIVE=y/g' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-                echo "CONFIG_KALLSYMS_BASE_RELATIVE=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-                if [ ${{ env.FIX_APATCH_OPENELA }} = true ]; then
-                    git apply $GITHUB_WORKSPACE/patches/FIX_APATCH_OPENELA.patch || {
-                    git apply $GITHUB_WORKSPACE/patches/REVERT_ADD_GET_CRED_RCU.patch
-                    git apply $GITHUB_WORKSPACE/patches/FIX_APATCH_OPENELA.patch
-                    }
-                fi
-        fi
+
+        # Disable LTO
         if [ ${{ env.DISABLE_LTO }} = true ]; then
             sed -i 's/CONFIG_LTO=y/CONFIG_LTO=n/' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
             sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
             sed -i 's/CONFIG_THINLTO=y/CONFIG_THINLTO=n/' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
             echo "CONFIG_LTO_NONE=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
         fi
+        
+        # Disable CC_WERROR
         if [ ${{ env.DISABLE_CC_WERROR }} = true ]; then
             echo "CONFIG_CC_WERROR=n" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
         fi
+        
+        # Old Android Support
         if [ ${{ env.OLD_ANDROID_SUPPORT }} = true ]; then
-            git apply $GITHUB_WORKSPACE/patches/OLD_ANDROID_SUPPORT.patch
-            if grep -q "CONFIG_MMC_CRYPTO_LEGACY" arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}; then
-                sed -i 's/# CONFIG_MMC_CRYPTO_LEGACY is not set/CONFIG_MMC_CRYPTO_LEGACY=y/g' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-                sed -i 's/CONFIG_MMC_CRYPTO_LEGACY=n/CONFIG_MMC_CRYPTO_LEGACY=y/g' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-            else
-                echo "CONFIG_MMC_CRYPTO_LEGACY=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-            fi
-        fi
-        if [ ${{ env.FIX_WIFI_SPEED }} = true ]; then
-            rm -rf drivers/misc/mediatek/connectivity
-            cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel/drivers/misc/mediatek
-            git clone https://github.com/Jbub5/connectivity.git --depth=1
-            cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+             echo "CONFIG_MMC_CRYPTO_LEGACY=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
         fi
 
     - name: Setup ccache
