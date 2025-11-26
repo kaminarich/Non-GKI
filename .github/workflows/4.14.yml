@@ -1,4 +1,4 @@
-Name: Build Jbub5 Kernel Lancelot Fixed Name
+name: Build Jbub5 Kernel Lancelot Fixed Name
 
 on:
   workflow_dispatch:
