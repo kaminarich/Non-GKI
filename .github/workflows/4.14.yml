@@ -1,4 +1,4 @@
-name: Build Jbub5 Lancelot Fix Redefinition
+name: Build Jbub5 Lancelot Final Fix
 
 on:
   workflow_dispatch:
@@ -235,10 +235,13 @@ jobs:
              fi
         fi
         
-        # --- FIX REDEFINITION ERROR ---
-        # Mengubah nama fungsi current_sid di KSU agar tidak konflik dengan kernel asli
-        cd drivers/kernelsu/selinux
-        sed -i 's/static inline u32 current_sid(void)/static inline u32 ksu_unused_sid(void)/' selinux.c
+        # --- FIX 1: REDEFINITION ERROR ---
+        # Ganti nama fungsi current_sid di KSU agar tidak konflik dengan kernel asli
+        sed -i 's/static inline u32 current_sid(void)/static inline u32 ksu_unused_sid(void)/' drivers/kernelsu/selinux/selinux.c
+        
+        # --- FIX 2: MODULE_IMPORT_NS ERROR ---
+        # Hapus baris MODULE_IMPORT_NS karena kernel 4.14 tidak support
+        sed -i '/MODULE_IMPORT_NS/d' drivers/kernelsu/ksu.c
         
     - name: Setup Configuration for Kernel
       run: |
@@ -435,7 +438,4 @@ jobs:
       env:
        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-       upload_url: ${{ steps.create_release.outputs.upload_url }}
-       asset_path: kernel_workspace/boot.img
-       asset_name: boot${{ env.LOCALVERSION }}${{ env.UPLOADNAME }}-${{ env.DEVICE }}-${{ env.BUILD_TIME }}.img
-       asset_content_type: application/octet-stream
+       upload_url: ${
