@@ -1,4 +1,4 @@
-name: Build Jbub5 Kernel Lancelot Fixed Name
+Name: Build Jbub5 Kernel Lancelot Fixed Name
 
 on:
   workflow_dispatch:
@@ -220,6 +220,13 @@ jobs:
             KSU_VERSION=""
         fi
         echo "UPLOADNAME=-KernelSU$KSU_VERSION" >> $GITHUB_ENV
+        
+        # --- FIX: MODULE_IMPORT_NS ERROR ---
+        # Memberikan komentar pada baris yang menyebabkan error "type specifier missing"
+        echo "Applying fix for MODULE_IMPORT_NS error..."
+        sed -i 's/MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);/\/\/ MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);/g' drivers/kernelsu/ksu.c || true
+        # -----------------------------------
+        
         if [ ${{ env.KSU_REVERT }} = true ]; then
              if [ -f $GITHUB_WORKSPACE/patches/KSU_REVERT.patch ]; then
                 git apply $GITHUB_WORKSPACE/patches/KSU_REVERT.patch
