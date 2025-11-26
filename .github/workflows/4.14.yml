@@ -1,4 +1,4 @@
-name: DEBUG FINAL - Jbub5 Lancelot (ThinLTO -j1)
+name: Build Jbub5 Lancelot Fix Redefinition
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Kernel Debug ThinLTO
+    name: Build Kernel by ${{ github.actor }}
     runs-on: ubuntu-22.04
     env:
       # --- KERNEL SOURCE ---
@@ -33,10 +33,15 @@ jobs:
       CUSTOM_GCC_32_SOURCE: "https://snapshots.linaro.org/gnu-toolchain/14.0-2023.06-1/arm-linux-gnueabihf/gcc-linaro-14.0.0-2023.06-x86_64_arm-linux-gnueabihf.tar.xz"
       CUSTOM_GCC_32_BIN: "arm-linux-gnueabihf"
 
+      # Fallback AOSP (Disabled)
+      ENABLE_GCC_AOSP: "false"
+      ENABLE_GCC_ARM64: "false"
+      ENABLE_GCC_ARM32: "false"
+
       # --- BUILD COMMANDS ---
       EXTRA_CMDS: "LLVM=1 LLVM_IAS=1 LD=ld.lld AS=llvm-as AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabihf- CROSS_COMPILE_COMPAT=arm-linux-gnueabihf- CONFIG_NO_ERROR_ON_MISMATCH=y TARGET_BUILD_VARIANT=user"
 
-      # --- KERNELSU ---
+      # --- KERNELSU & FEATURES ---
       ENABLE_KERNELSU: "true"
       KERNELSU_SETUP_SOURCE: "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh"
       KERNELSU_TAG: "v1.0.1"
@@ -58,11 +63,8 @@ jobs:
       NEED_DTBO: "false"
       ENABLE_CCACHE: "false"
       REMOVE_UNUSED_PACKAGES: "false"
-      
-      # --- LTO (Setting ini akan di-unset di step build) ---
       DISABLE_LTO: "false"
-      DISABLE_CC_WERROR: "true"
-      
+      DISABLE_CC_WERROR: "false"
       FIX_WIFI_SPEED: "false"
       
       # System Settings
@@ -172,16 +174,30 @@ jobs:
         cd $GITHUB_WORKSPACE/kernel_workspace
         git clone https://android.googlesource.com/platform/system/tools/mkbootimg tools -b master-kernel-build-2022 --depth=1
 
-    - name: Download kernel source and Set Name
+    - name: Download kernel source and DEBUG Name
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
         git clone --recursive ${{ env.KERNEL_SOURCE }} -b ${{ env.KERNEL_SOURCE_BRANCH }} android-kernel --depth=1
         
-        # --- PERBAIKAN NAMA KERNEL ---
         cd android-kernel
-        sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION =/' Makefile
+        
+        echo "=== DEBUG: Original Makefile EXTRAVERSION ==="
+        grep "EXTRAVERSION =" Makefile
+        echo "============================================"
+
+        sed -i 's/^EXTRAVERSION.*/EXTRAVERSION =/' Makefile
+        
+        sed -i 's/CONFIG_LOCALVERSION_AUTO=y/CONFIG_LOCALVERSION_AUTO=n/' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
+        echo "CONFIG_LOCALVERSION_AUTO=n" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
+
+        echo "#!/bin/sh" > scripts/setlocalversion
+        echo "echo ''" >> scripts/setlocalversion
+        chmod +x scripts/setlocalversion
+        
         touch .scmversion
-        echo "-💠Aetherium1.0-DEBUG" > localversion
+
+        echo "-💠Aetherium1.0-Primordial" > localversion
+        
         cd ..
         
         if [[ ${{ env.ADD_LOCALVERSION_TO_FILENAME }} == 'true' ]]; then
@@ -211,12 +227,6 @@ jobs:
             KSU_VERSION=""
         fi
         echo "UPLOADNAME=-KernelSU$KSU_VERSION" >> $GITHUB_ENV
-        
-        # --- FIX KSU: DELETE MODULE_IMPORT_NS LINE ---
-        echo "Deleting problematic MODULE_IMPORT_NS line..."
-        sed -i '/VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver/d' drivers/kernelsu/ksu.c || true
-        # ---------------------------------------------
-        
         if [ ${{ env.KSU_REVERT }} = true ]; then
              if [ -f $GITHUB_WORKSPACE/patches/KSU_REVERT.patch ]; then
                 git apply $GITHUB_WORKSPACE/patches/KSU_REVERT.patch
@@ -224,6 +234,11 @@ jobs:
                 echo "Warning: KSU_REVERT patch not found, skipping."
              fi
         fi
+        
+        # --- FIX REDEFINITION ERROR ---
+        # Mengubah nama fungsi current_sid di KSU agar tidak konflik dengan kernel asli
+        cd drivers/kernelsu/selinux
+        sed -i 's/static inline u32 current_sid(void)/static inline u32 ksu_unused_sid(void)/' selinux.c
         
     - name: Setup Configuration for Kernel
       run: |
@@ -245,27 +260,12 @@ jobs:
             echo "CONFIG_OVERLAY_FS_REDIRECT_DIR=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
             echo "CONFIG_OVERLAY_FS_INDEX=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
         fi
-
-        # --- LOGIC THINLTO VS DISABLE LTO ---
         if [ ${{ env.DISABLE_LTO }} = true ]; then
             sed -i 's/CONFIG_LTO=y/CONFIG_LTO=n/' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
             sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
             sed -i 's/CONFIG_THINLTO=y/CONFIG_THINLTO=n/' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
             echo "CONFIG_LTO_NONE=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-        else
-            # Jika LTO "false" (Artinya dinyalakan), kita paksa ThinLTO
-            echo "Forcing ThinLTO configuration..."
-            # Pastikan base LTO nyala
-            echo "CONFIG_LTO=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-            echo "CONFIG_LTO_CLANG=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-            # Nyalakan ThinLTO
-            echo "CONFIG_THINLTO=y" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-            # Pastikan Full LTO MATI
-            sed -i 's/CONFIG_LTO_CLANG_FULL=y/CONFIG_LTO_CLANG_FULL=n/' arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-            echo "CONFIG_LTO_CLANG_FULL=n" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
         fi
-        # ------------------------------------
-
         if [ ${{ env.DISABLE_CC_WERROR }} = true ]; then
             echo "CONFIG_CC_WERROR=n" >> arch/${{ env.KERNEL_ARCH }}/configs/${{ env.KERNEL_CONFIG }}
         fi
@@ -280,7 +280,7 @@ jobs:
         key: build-kernel-${{ env.DEVICE }}${{ env.LOCALVERSION }}${{ env.UPLOADNAME }}
         max-size: 2G
 
-    - name: Build kernel (SINGLE THREAD -j1)
+    - name: Build kernel
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         
@@ -302,20 +302,17 @@ jobs:
           export KSU_EXPECTED_HASH=${{ env.KSU_EXPECTED_HASH }}
         fi
         
-        # --- FIX: UNSET VARIABLES ---
-        # Hapus variabel ini agar clang tidak mengira ini nama file
-        unset DISABLE_LTO
-        unset DISABLE_CC_WERROR
-        # ----------------------------
-
-        # --- DEBUG MODE AKTIF: -j1 ---
-        # Build lambat tapi error pasti muncul di bawah
-        make -j1 CC=clang O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }} ${{ env.KERNEL_CONFIG }}
+        # --- FINAL DEBUG CHECK ---
+        echo "=== DEBUG: Kernel Version Preview ==="
+        make kernelversion
+        echo "====================================="
+        
+        make -j$(nproc --all) CC=clang O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }} ${{ env.KERNEL_CONFIG }}
         
         if [ ${{ env.ENABLE_CCACHE }} = true ]; then
-             make -j1 CC="ccache clang" O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }}
+             make -j$(nproc --all) CC="ccache clang" O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }}
         else
-             make -j1 CC=clang O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }}
+             make -j$(nproc --all) CC=clang O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }}
         fi
 
     - name: Check a kernel output files
