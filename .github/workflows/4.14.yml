@@ -1,4 +1,4 @@
-name: Build Jbub5 Kernel Lancelot (ThinLTO Fixed)
+name: DEBUG FINAL - Jbub5 Lancelot (ThinLTO -j1)
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Kernel ThinLTO by ${{ github.actor }}
+    name: Build Kernel Debug ThinLTO
     runs-on: ubuntu-22.04
     env:
       # --- KERNEL SOURCE ---
@@ -33,16 +33,10 @@ jobs:
       CUSTOM_GCC_32_SOURCE: "https://snapshots.linaro.org/gnu-toolchain/14.0-2023.06-1/arm-linux-gnueabihf/gcc-linaro-14.0.0-2023.06-x86_64_arm-linux-gnueabihf.tar.xz"
       CUSTOM_GCC_32_BIN: "arm-linux-gnueabihf"
 
-      # Fallback AOSP (Disabled)
-      ENABLE_GCC_AOSP: "false"
-      ENABLE_GCC_ARM64: "false"
-      ENABLE_GCC_ARM32: "false"
-
       # --- BUILD COMMANDS ---
-      # Menambahkan LD=ld.lld penting untuk LTO
       EXTRA_CMDS: "LLVM=1 LLVM_IAS=1 LD=ld.lld AS=llvm-as AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabihf- CROSS_COMPILE_COMPAT=arm-linux-gnueabihf- CONFIG_NO_ERROR_ON_MISMATCH=y TARGET_BUILD_VARIANT=user"
 
-      # --- KERNELSU & FEATURES ---
+      # --- KERNELSU ---
       ENABLE_KERNELSU: "true"
       KERNELSU_SETUP_SOURCE: "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh"
       KERNELSU_TAG: "v1.0.1"
@@ -65,8 +59,7 @@ jobs:
       ENABLE_CCACHE: "false"
       REMOVE_UNUSED_PACKAGES: "false"
       
-      # --- LTO SETTINGS ---
-      # Set ke "false" agar logic ThinLTO di bawah berjalan
+      # --- LTO (Setting ini akan di-unset di step build) ---
       DISABLE_LTO: "false"
       DISABLE_CC_WERROR: "true"
       
@@ -188,7 +181,7 @@ jobs:
         cd android-kernel
         sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION =/' Makefile
         touch .scmversion
-        echo "-💠Aetherium1.0-ThinLTO" > localversion
+        echo "-💠Aetherium1.0-DEBUG" > localversion
         cd ..
         
         if [[ ${{ env.ADD_LOCALVERSION_TO_FILENAME }} == 'true' ]]; then
@@ -287,7 +280,7 @@ jobs:
         key: build-kernel-${{ env.DEVICE }}${{ env.LOCALVERSION }}${{ env.UPLOADNAME }}
         max-size: 2G
 
-    - name: Build kernel
+    - name: Build kernel (SINGLE THREAD -j1)
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         
@@ -315,12 +308,14 @@ jobs:
         unset DISABLE_CC_WERROR
         # ----------------------------
 
-        make -j$(nproc --all) CC=clang O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }} ${{ env.KERNEL_CONFIG }}
+        # --- DEBUG MODE AKTIF: -j1 ---
+        # Build lambat tapi error pasti muncul di bawah
+        make -j1 CC=clang O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }} ${{ env.KERNEL_CONFIG }}
         
         if [ ${{ env.ENABLE_CCACHE }} = true ]; then
-             make -j$(nproc --all) CC="ccache clang" O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }}
+             make -j1 CC="ccache clang" O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }}
         else
-             make -j$(nproc --all) CC=clang O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }}
+             make -j1 CC=clang O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }}
         fi
 
     - name: Check a kernel output files
