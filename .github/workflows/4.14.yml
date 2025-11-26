@@ -1,4 +1,4 @@
-name: Build Jbub5 Kernel Lancelot Fixed
+name: Build Jbub5 Kernel Lancelot Fixed Name
 
 on:
   workflow_dispatch:
@@ -39,7 +39,6 @@ jobs:
       ENABLE_GCC_ARM32: "false"
 
       # --- BUILD COMMANDS ---
-      # FIX: Mengubah gnueabi- menjadi gnueabihf- agar sesuai dengan GCC Linaro yang didownload
       EXTRA_CMDS: "LLVM=1 LLVM_IAS=1 LD=ld.lld AS=llvm-as AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabihf- CROSS_COMPILE_COMPAT=arm-linux-gnueabihf- CONFIG_NO_ERROR_ON_MISMATCH=y TARGET_BUILD_VARIANT=user"
 
       # --- KERNELSU & FEATURES ---
@@ -180,8 +179,19 @@ jobs:
         cd $GITHUB_WORKSPACE/kernel_workspace
         git clone --recursive ${{ env.KERNEL_SOURCE }} -b ${{ env.KERNEL_SOURCE_BRANCH }} android-kernel --depth=1
         
-        # Set Custom Kernel Name (Hardcoded)
-        echo "-💠Aetherium1.0-Primordial" > android-kernel/localversion
+        # --- PERBAIKAN NAMA KERNEL ---
+        cd android-kernel
+        
+        # 1. Bersihkan EXTRAVERSION di Makefile (Hapus -openela-rc1 dll)
+        sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION =/' Makefile
+        
+        # 2. Cegah penambahan Git Hash (embel-embel -gXXXXXX)
+        touch .scmversion
+        
+        # 3. Set Nama Custom
+        echo "-💠Aetherium1.0-Primordial" > localversion
+        
+        cd ..
         
         if [[ ${{ env.ADD_LOCALVERSION_TO_FILENAME }} == 'true' ]]; then
           echo "LOCALVERSION=$(cat android-kernel/localversion)" >> $GITHUB_ENV
@@ -262,9 +272,6 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         
-        # FIX: Tambahkan Clang DAN GCC ke PATH secara bersamaan, bukan if/else
-        # Ini penting agar ld.lld (dari clang) bisa ditemukan meskipun kita pakai GCC
-        
         export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang/bin:$PATH
         
         if [ ${{ env.USE_CUSTOM_GCC }} = true ]; then
@@ -284,7 +291,6 @@ jobs:
         fi
         make -j$(nproc --all) CC=clang O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }} ${{ env.KERNEL_CONFIG }}
         
-        # CCACHE Logic (Optional, disable for now as config says false)
         if [ ${{ env.ENABLE_CCACHE }} = true ]; then
              make -j$(nproc --all) CC="ccache clang" O=out ARCH=${{ env.KERNEL_ARCH }} ${{ env.EXTRA_CMDS }}
         else
