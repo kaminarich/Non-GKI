@@ -1,4 +1,4 @@
-name: Build Kernel Lancelot Fixed
+name: Build Proton Kernel Lancelot
 
 on:
   workflow_dispatch:
@@ -11,47 +11,65 @@ jobs:
     name: Build Kernel by ${{ github.actor }}
     runs-on: ubuntu-22.04
     env:
-      # --- CONFIGURATION START ---
-      # Menggunakan Source Community Lancelot yang RESMI & HIDUP
-      KERNEL_SOURCE: "https://github.com/mi-mt6768/android_kernel_xiaomi_mt6768"
-      KERNEL_SOURCE_BRANCH: "lineage-19.1"
+      # --- KERNEL SOURCE ---
+      KERNEL_SOURCE: "https://github.com/MrShockWAVEE/Proton_kernel_Xioami_mt6768"
+      KERNEL_SOURCE_BRANCH: "ShockWAVE-Tree-WIP"
       KERNEL_CONFIG: "lancelot_defconfig"
       KERNEL_IMAGE_NAME: "Image.gz-dtb"
       KERNEL_ARCH: "arm64"
-      ADD_LOCALVERSION_TO_FILENAME: "true"
+      ADD_LOCALVERSION_TO_FILENAME: "false"
 
-      # Compiler Settings (Clang 12 + GCC AOSP is standard for 4.14)
-      USE_CUSTOM_CLANG: "false"
-      CLANG_BRANCH: "master-kernel-build-2021"
-      CLANG_VERSION: "r416183b"
-      ENABLE_GCC_AOSP: "true"
+      # --- COMPILER SETTINGS (Custom Clang + GCC Linaro) ---
+      USE_CUSTOM_CLANG: "true"
+      CUSTOM_CLANG_SOURCE: "https://github.com/ZyCromerZ/Clang/releases/download/21.0.0git-20250425-release/Clang-21.0.0git-20250425.tar.gz"
+      CUSTOM_CLANG_BRANCH: ""
+      
+      # Saya set True agar GCC Linaro didownload
+      USE_CUSTOM_GCC: "true" 
+      USE_CUSTOM_GCC_64: "true"
+      CUSTOM_GCC_64_SOURCE: "https://snapshots.linaro.org/gnu-toolchain/14.0-2023.06-1/aarch64-linux-gnu/gcc-linaro-14.0.0-2023.06-x86_64_aarch64-linux-gnu.tar.xz"
+      CUSTOM_GCC_64_BIN: "aarch64-linux-gnu"
+      
+      USE_CUSTOM_GCC_32: "true"
+      CUSTOM_GCC_32_SOURCE: "https://snapshots.linaro.org/gnu-toolchain/14.0-2023.06-1/arm-linux-gnueabihf/gcc-linaro-14.0.0-2023.06-x86_64_arm-linux-gnueabihf.tar.xz"
+      CUSTOM_GCC_32_BIN: "arm-linux-gnueabihf"
+
+      # Fallback AOSP (Disabled as per your config)
+      ENABLE_GCC_AOSP: "false"
       ENABLE_GCC_ARM64: "true"
       ENABLE_GCC_ARM32: "true"
-      USE_CUSTOM_GCC: "false"
-      
-      # KernelSU Settings
+
+      # --- BUILD COMMANDS (Full LLVM) ---
+      EXTRA_CMDS: "LLVM=1 LLVM_IAS=1 LD=ld.lld AS=llvm-as AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CONFIG_NO_ERROR_ON_MISMATCH=y TARGET_BUILD_VARIANT=user"
+
+      # --- KERNELSU & FEATURES ---
       ENABLE_KERNELSU: "true"
-      KSU_HOOKS_PATCH: "true"
+      KSU_HOOKS_PATCH: "false"
       KSU_REVERT: "false"
-      ADD_KPROBES_CONFIG: "true"
+      ADD_KPROBES_CONFIG: "false"
       ADD_OVERLAYFS_CONFIG: "true"
+      ADD_APATCH_SUPPORT: "false"
+      FIX_APATCH_OPENELA: "false"
+      OLD_ANDROID_SUPPORT: "true"
       
-      # AnyKernel3 (False = Auto Generate, Lebih aman anti error link mati)
-      USE_CUSTOM_ANYKERNEL3: "false"
-      CUSTOM_ANYKERNEL3_SOURCE: ""
-      CUSTOM_ANYKERNEL3_BRANCH: ""
+      # --- ANYKERNEL3 ---
+      USE_CUSTOM_ANYKERNEL3: "true"
+      CUSTOM_ANYKERNEL3_SOURCE: "https://github.com/Edhic1/AnyKernel3.git"
+      CUSTOM_ANYKERNEL3_BRANCH: "master"
       
-      # Boot Image & Misc
+      # --- MISC ---
       BUILD_BOOT_IMG: "false"
       NEED_DTBO: "false"
-      ENABLE_CCACHE: "true"
-      REMOVE_UNUSED_PACKAGES: "true"
+      ENABLE_CCACHE: "false"
+      REMOVE_UNUSED_PACKAGES: "false"
+      DISABLE_LTO: "false"
+      DISABLE_CC_WERROR: "false"
+      FIX_WIFI_SPEED: "false"
       
       # System Settings
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
-      # --- CONFIGURATION END ---
 
     steps:
     - uses: actions/checkout@v4
@@ -81,16 +99,8 @@ jobs:
         sudo apt-get install git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses5-dev libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler python2 python3 binutils-aarch64-linux-gnu
         mkdir -p $GITHUB_WORKSPACE/kernel_workspace
 
-    - name: Download AOSP Clang
-      if: env.USE_CUSTOM_CLANG != 'true' && env.USE_CUSTOM_GCC != 'true' && env.ENABLE_GCC_AOSP != 'true'
-      run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace
-        mkdir clang
-        wget -nv https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/${{ env.CLANG_BRANCH }}/clang-${{ env.CLANG_VERSION }}.tar.gz
-        tar -C clang/ -zxvf clang-${{ env.CLANG_VERSION }}.tar.gz
-
     - name: Download Custom Clang
-      if: env.USE_CUSTOM_CLANG == 'true' && env.USE_CUSTOM_GCC != 'true' && env.ENABLE_GCC_AOSP != 'true'
+      if: env.USE_CUSTOM_CLANG == 'true'
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
         if [[ ${{ env.CUSTOM_CLANG_SOURCE }} == *'.tar.gz' ]]; then
@@ -112,22 +122,49 @@ jobs:
             mv -f "$(find ./clang -mindepth 1 -maxdepth 1 -type d)"/* ./clang
         fi
 
-    - name: Download GCC AOSP
-      if: env.ENABLE_GCC_AOSP == 'true' && env.USE_CUSTOM_GCC != 'true' && env.USE_CUSTOM_CLANG != 'true'
+    - name: Download Custom GCC
+      if: env.USE_CUSTOM_GCC == 'true'
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
-        if [ ${{ env.ENABLE_GCC_ARM64 }} = true ]; then
-            mkdir gcc-64
-            wget -nv -O gcc-aarch64.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
-            tar -C gcc-64/ -zxvf gcc-aarch64.tar.gz
-            echo "GCC_64=CROSS_COMPILE=$GITHUB_WORKSPACE/kernel_workspace/gcc-64/bin/aarch64-linux-android-" >> $GITHUB_ENV
+        if [ ${{ env.USE_CUSTOM_GCC_64 }} = true ]; then
+            if [[ ${{ env.CUSTOM_GCC_64_SOURCE }} == *'.tar.gz' ]]; then
+                wget -nv -O gcc-64.tar.gz ${{ env.CUSTOM_GCC_64_SOURCE }}
+                mkdir gcc-64
+                tar -C gcc-64/ -zxvf gcc-64.tar.gz
+            elif [[ ${{ env.CUSTOM_GCC_64_SOURCE }} == *'.tar.xz' ]]; then
+                wget -nv -O gcc-64.xz ${{ env.CUSTOM_GCC_64_SOURCE }}
+                mkdir gcc-64
+                tar -C gcc-64/ -Jxvf gcc-64.xz
+            elif [[ ${{ env.CUSTOM_GCC_64_SOURCE }} == *'.git' ]]; then
+                git clone ${{ env.CUSTOM_GCC_64_SOURCE }} -b ${{ env.CUSTOM_GCC_64_BRANCH }} gcc-64 --depth=1
+            else
+                wget -nv -O gcc-64.zip ${{ env.CUSTOM_GCC_64_SOURCE }}
+                mkdir gcc-64
+                unzip gcc-64.zip -d gcc-64/
+            fi
+            if [[ "$(find ./gcc-64 -mindepth 1 -maxdepth 1 -type d | wc -l)" == "1" ]]; then
+                mv -f "$(find ./gcc-64 -mindepth 1 -maxdepth 1 -type d)"/* ./gcc-64
+            fi
         fi
-
-        if [ ${{ env.ENABLE_GCC_ARM32 }} = true ]; then
-            mkdir gcc-32
-            wget -nv -O gcc-arm.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
-            tar -C gcc-32/ -zxvf gcc-arm.tar.gz
-            echo "GCC_32=CROSS_COMPILE_ARM32=$GITHUB_WORKSPACE/kernel_workspace/gcc-32/bin/arm-linux-androideabi-" >> $GITHUB_ENV
+        if [ ${{ env.USE_CUSTOM_GCC_32 }} = true ]; then
+            if [[ ${{ env.CUSTOM_GCC_32_SOURCE }} == *'.tar.gz' ]]; then
+                wget -nv -O gcc-32.tar.gz ${{ env.CUSTOM_GCC_32_SOURCE }}
+                mkdir gcc-32
+                tar -C gcc-32/ -zxvf gcc-32.tar.gz
+            elif [[ ${{ env.CUSTOM_GCC_32_SOURCE }} == *'.tar.xz' ]]; then
+                wget -nv -O gcc-32.xz ${{ env.CUSTOM_GCC_32_SOURCE }}
+                mkdir gcc-32
+                tar -C gcc-32/ -Jxvf gcc-32.xz
+            elif [[ ${{ env.CUSTOM_GCC_32_SOURCE }} == *'.git' ]]; then
+                git clone ${{ env.CUSTOM_GCC_32_SOURCE }} -b ${{ env.CUSTOM_GCC_32_BRANCH }} gcc-32 --depth=1
+            else
+                wget -nv -O gcc-32.zip ${{ env.CUSTOM_GCC_32_SOURCE }}
+                mkdir gcc-32
+                unzip gcc-32.zip -d gcc-32/
+            fi
+            if [[ "$(find ./gcc-32 -mindepth 1 -maxdepth 1 -type d | wc -l)" == "1" ]]; then
+                mv -f "$(find ./gcc-32 -mindepth 1 -maxdepth 1 -type d)"/* ./gcc-32
+            fi
         fi
 
     - name: Download mkbootimg tools
